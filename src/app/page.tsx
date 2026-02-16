@@ -50,7 +50,7 @@ const CitationPopup = ({ source, children }: { source: Source; children: React.R
         {children}
       </span>
       {isVisible && (
-        <span className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-4 bg-white border border-[#dcd3b6] shadow-2xl rounded-lg text-xs text-[#2d2a26] animate-in fade-in zoom-in-95 duration-200">
+        <span className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-[85vw] max-w-72 p-4 bg-white border border-[#dcd3b6] shadow-2xl rounded-lg text-xs text-[#2d2a26] animate-in fade-in zoom-in-95 duration-200">
           <p className="font-bold mb-2 text-[#a52a2a] border-b border-[#dcd3b6] pb-1">【出典】『{source.title}』</p>
           <p className="italic text-[#6b6b6b] mb-3 leading-relaxed line-clamp-4">「{source.snippet}」</p>
           <div className="flex justify-between items-center mt-2 pt-2 border-t border-[#f4f1e6]">
@@ -59,9 +59,9 @@ const CitationPopup = ({ source, children }: { source: Source; children: React.R
               href={source.link}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-1 bg-[#a52a2a] text-white rounded shadow-sm hover:bg-[#8b2323] transition-all hover:scale-105 active:scale-95"
+              className="px-3 py-1 bg-[#a52a2a] text-white rounded shadow-sm hover:bg-[#8b2323] transition-all hover:scale-105 active:scale-95 text-[10px]"
             >
-              NDLで開く ↗
+              NDL ↗
             </a>
           </div>
           <span className="absolute top-full left-1/2 -translate-x-1/2 border-[8px] border-transparent border-t-white"></span>
@@ -268,8 +268,16 @@ export default function Home() {
 
   return (
     <div className="flex h-screen bg-[#f4f1e6] text-[#2d2a26] overflow-hidden font-japanese">
+      {/* --- Sidebar Overlay for Mobile --- */}
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/20 backdrop-blur-[1px] z-30 sm:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
       {/* --- Sidebar --- */}
-      <aside className={`bg-[#e5e1d3] border-r border-[#dcd3b6] transition-all duration-300 flex flex-col z-20 ${isSidebarOpen ? 'w-full sm:w-72' : 'w-0 overflow-hidden'}`}>
+      <aside className={`fixed inset-y-0 left-0 bg-[#e5e1d3] border-r border-[#dcd3b6] transition-all duration-300 flex flex-col z-40 sm:relative ${isSidebarOpen ? 'w-full sm:w-72 translate-x-0' : 'w-0 -translate-x-full sm:translate-x-0 overflow-hidden'}`}>
         <div className="p-4 border-b border-[#dcd3b6] bg-[#dcd3b6]/20">
           <div className="flex justify-between items-center mb-4">
             <h2 className="font-bold tracking-widest text-[#a52a2a] text-sm">対話の巻物</h2>
@@ -375,21 +383,25 @@ export default function Home() {
       {/* --- Main Chat Area --- */}
       <main className="flex-1 flex flex-col relative min-w-0 bg-[#fefdfa]">
         <header className="px-4 py-3 border-b border-[#dcd3b6] bg-white/60 backdrop-blur-md flex items-center justify-between sticky top-0 z-10 shadow-sm">
-          <div className="flex items-center gap-4">
-            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-[#dcd3b6] rounded-full transition-all text-[#a52a2a]" title="サイドバー切替">
+          <div className="flex items-center gap-3 sm:gap-4 overflow-hidden">
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-2 hover:bg-[#dcd3b6] rounded-full transition-all text-[#a52a2a] flex-shrink-0"
+              title="サイドバー切替"
+            >
               {isSidebarOpen ? '❮' : '❯'}
             </button>
-            <div className="border-l border-[#dcd3b6] pl-4 h-6 hidden sm:block"></div>
-            <h1 className="text-lg font-bold tracking-[0.2em] text-[#2d2a26] truncate">
+            <div className="border-l border-[#dcd3b6] pl-3 sm:pl-4 h-6 flex-shrink-0"></div>
+            <h1 className="text-sm sm:text-lg font-bold tracking-tight sm:tracking-[0.2em] text-[#2d2a26] truncate">
               {activeThread?.title || '歴史資料横断検索'}
             </h1>
           </div>
-          <div className="text-[9px] text-[#9b9b9b] tracking-wider text-right uppercase">
-            NDL Digital Collection Assistant
+          <div className="text-[8px] sm:text-[9px] text-[#9b9b9b] tracking-wider text-right uppercase flex-shrink-0 ml-2">
+            <span className="hidden xs:inline">NDL Digital Collection </span>Assistant
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-4 py-8 md:px-12 space-y-8 scroll-smooth" ref={scrollRef}>
+        <div className="flex-1 overflow-y-auto px-4 py-6 sm:py-8 md:px-12 space-y-6 sm:space-y-8 scroll-smooth" ref={scrollRef}>
           {activeThread?.messages.map((msg, i) => (
             <div
               key={msg.id || `msg-${i}`}
@@ -397,10 +409,10 @@ export default function Home() {
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-500`}
             >
               <div className={`max-w-[90%] md:max-w-[85%] p-6 rounded-2xl shadow-sm border leading-relaxed relative ${msg.role === 'user'
-                  ? 'bg-[#a52a2a] text-[#fdfaf4] border-[#8b2323] rounded-tr-none'
-                  : msg.role === 'system'
-                    ? 'bg-red-50 text-red-700 border-red-200 text-sm italic'
-                    : `bg-white text-[#2d2a26] border-[#dcd3b6] rounded-tl-none transition-all duration-1000 ${highlightedMessageId === msg.id ? 'ring-2 ring-yellow-400 ring-offset-4 bg-yellow-50' : ''}`
+                ? 'bg-[#a52a2a] text-[#fdfaf4] border-[#8b2323] rounded-tr-none'
+                : msg.role === 'system'
+                  ? 'bg-red-50 text-red-700 border-red-200 text-sm italic'
+                  : `bg-white text-[#2d2a26] border-[#dcd3b6] rounded-tl-none transition-all duration-1000 ${highlightedMessageId === msg.id ? 'ring-2 ring-yellow-400 ring-offset-4 bg-yellow-50' : ''}`
                 }`}>
                 {msg.role === 'assistant' && <div className="absolute -top-3 -left-1 text-[10px] bg-[#dcd3b6] px-2 py-0.5 rounded text-[#6b6b6b] font-bold">資料記録部</div>}
 
@@ -444,30 +456,30 @@ export default function Home() {
 
         <div className="p-6 bg-gradient-to-t from-[#f4f1e6] to-[#f4f1e6]/0 pointer-events-none absolute bottom-0 left-0 right-0 h-40"></div>
 
-        <footer className="p-6 md:p-10 relative z-10 bg-[#f4f1e6]/80 backdrop-blur-sm border-t border-[#dcd3b6]">
-          <form onSubmit={handleSubmit} className="max-w-4xl mx-auto flex gap-4">
+        <footer className="p-4 sm:p-6 md:p-10 relative z-10 bg-[#f4f1e6]/80 backdrop-blur-sm border-t border-[#dcd3b6]">
+          <form onSubmit={handleSubmit} className="max-w-4xl mx-auto flex gap-2 sm:gap-4">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="古の記録、語り継がれし怪異を問う..."
-              className="flex-1 px-6 py-4 rounded-2xl border border-[#dcd3b6] bg-white shadow-inner text-sm focus:outline-none focus:ring-2 focus:ring-[#a52a2a] focus:border-transparent transition-all placeholder:text-[#9b9b9b]"
+              placeholder="歴史を問う..."
+              className="flex-1 px-4 sm:px-6 py-3 sm:py-4 rounded-xl sm:rounded-2xl border border-[#dcd3b6] bg-white shadow-inner text-sm focus:outline-none focus:ring-2 focus:ring-[#a52a2a] focus:border-transparent transition-all placeholder:text-[#9b9b9b]"
               disabled={isLoading}
             />
             <button
               type="submit"
               disabled={isLoading || !input.trim()}
-              className="px-8 bg-[#a52a2a] text-white font-bold rounded-2xl shadow-xl hover:bg-[#8b2323] hover:shadow-2xl active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 flex items-center gap-2"
+              className="px-4 sm:px-8 bg-[#a52a2a] text-white font-bold rounded-xl sm:rounded-2xl shadow-xl hover:bg-[#8b2323] hover:shadow-2xl active:scale-95 transition-all disabled:opacity-50 flex items-center gap-1 sm:gap-2 text-sm sm:text-base"
             >
               <span>問う</span>
-              <span className="text-lg opacity-80 mt-[-2px]">≫</span>
+              <span className="text-lg opacity-80 hidden sm:inline">≫</span>
             </button>
           </form>
-          <div className="max-w-4xl mx-auto flex justify-between items-center mt-6">
-            <p className="text-[10px] text-[#9b9b9b] tracking-tight">
-              ※本システムは国立国会図書館のオープンデータを利用して構築されています。
+          <div className="max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center mt-4 sm:mt-6 gap-2">
+            <p className="text-[9px] sm:text-[10px] text-[#9b9b9b] tracking-tight text-center sm:text-left">
+              ※本システムは国立国会図書館のオープンデータを利用しています。
             </p>
-            <p className="text-[9px] font-bold text-[#a52a2a] tracking-widest uppercase opacity-60">
+            <p className="text-[8px] sm:text-[9px] font-bold text-[#a52a2a] tracking-widest uppercase opacity-60">
               Antigravity Research Labs
             </p>
           </div>
