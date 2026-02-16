@@ -250,6 +250,38 @@ export default function Home() {
     setSearchTerm('');
   };
 
+  const exportThreadToMarkdown = (thread: Thread) => {
+    let content = `# ${thread.title}\n\n`;
+    content += `生成日: ${new Date(thread.updatedAt).toLocaleString('ja-JP')}\n`;
+    content += `ソース: NDL 考古学探索システム\n\n---\n\n`;
+
+    thread.messages.forEach(msg => {
+      if (msg.role === 'system') return;
+
+      const roleName = msg.role === 'user' ? '【問】(User)' : '【答】(Assistant)';
+      content += `### ${roleName}\n\n${msg.content}\n\n`;
+
+      if (msg.sources && msg.sources.length > 0) {
+        content += `#### 参考文献:\n`;
+        msg.sources.forEach((src, idx) => {
+          content += `- [${idx + 1}] 『${src.title}』 (第${src.page}コマ)\n  リンク: ${src.link}\n  抜粋: 「${src.snippet}」\n`;
+        });
+        content += `\n`;
+      }
+      content += `---\n\n`;
+    });
+
+    const blob = new Blob([content], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${thread.title.replace(/[\\/:*?"<>|]/g, '_')}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const renderMessageContent = (content: string, sources?: Source[]) => {
     if (!sources || sources.length === 0) return content;
     const parts = content.split(/(<cite id="\d+">[\s\S]*?<\/cite>)/g);
@@ -338,6 +370,13 @@ export default function Home() {
                         title="名前を変更"
                       >
                         ✎
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); exportThreadToMarkdown(t); }}
+                        className="p-1 hover:text-[#a52a2a] text-[10px]"
+                        title="Markdownで保存"
+                      >
+                        ↓
                       </button>
                       <button
                         onClick={(e) => confirmDelete(t.id, e)}
