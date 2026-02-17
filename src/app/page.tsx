@@ -32,6 +32,70 @@ interface SearchResult {
   content: string;
 }
 
+// --- Crypto Utilities ---
+/**
+ * セキュアな保存のための簡易暗号化 (AES-GCM)
+ * ※クライアントサイドのみの保護ですが、平文での露出を避けます。
+ */
+const ENCRYPTION_KEY = 'ndl-chat-vault-key'; // ソルト/キー識別子として使用
+
+async function encryptData(text: string) {
+  try {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text);
+    const password = encoder.encode(ENCRYPTION_KEY);
+
+    const key = await crypto.subtle.importKey(
+      'raw', password, { name: 'PBKDF2' }, false, ['deriveKey']
+    );
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const aesKey = await crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+      key, { name: 'AES-GCM', length: 256 }, false, ['encrypt']
+    );
+
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, data);
+
+    // Salt + IV + Data の順で結合してBase64化
+    const combined = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
+    combined.set(salt);
+    combined.set(iv, salt.length);
+    combined.set(new Uint8Array(encrypted), salt.length + iv.length);
+
+    return btoa(String.fromCharCode(...combined));
+  } catch (e) {
+    console.error('Encryption failed', e);
+    return text;
+  }
+}
+
+async function decryptData(cipherText: string) {
+  try {
+    const combined = new Uint8Array(atob(cipherText).split('').map(c => c.charCodeAt(0)));
+    const salt = combined.slice(0, 16);
+    const iv = combined.slice(16, 28);
+    const data = combined.slice(28);
+
+    const encoder = new TextEncoder();
+    const password = encoder.encode(ENCRYPTION_KEY);
+
+    const key = await crypto.subtle.importKey(
+      'raw', password, { name: 'PBKDF2' }, false, ['deriveKey']
+    );
+    const aesKey = await crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+      key, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+    );
+
+    const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, data);
+    return new TextDecoder().decode(decrypted);
+  } catch (e) {
+    console.error('Decryption failed', e);
+    return '';
+  }
+}
+
 // --- Components ---
 
 /**
@@ -83,32 +147,44 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState('');
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState('gemini-2.0-flash');
+  const [apiKey, setApiKey] = useState('');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
   // --- Persistence ---
   useEffect(() => {
-    const saved = localStorage.getItem('ndl-chat-threads');
-    if (saved) {
-      try {
-        const parsed: Thread[] = JSON.parse(saved);
-        // IDが欠けている古いデータへの互換性処理
-        const migrated = parsed.map(t => ({
-          ...t,
-          messages: t.messages.map((m, idx) => ({
-            ...m,
-            id: m.id || `msg-${t.id}-${idx}`
-          }))
-        }));
-        setThreads(migrated);
-        if (migrated.length > 0) setActiveThreadId(migrated[0].id);
-      } catch (e) {
-        console.error('Failed to load threads', e);
+    const init = async () => {
+      const saved = localStorage.getItem('ndl-chat-threads');
+      const savedEncryptedKey = localStorage.getItem('ndl-gemini-api-key-v2');
+
+      if (savedEncryptedKey) {
+        const decrypted = await decryptData(savedEncryptedKey);
+        setApiKey(decrypted);
       }
-    } else {
-      createNewThread();
-    }
+
+      if (saved) {
+        try {
+          const parsed: Thread[] = JSON.parse(saved);
+          // IDが欠けている古いデータへの互換性処理
+          const migrated = parsed.map(t => ({
+            ...t,
+            messages: t.messages.map((m, idx) => ({
+              ...m,
+              id: m.id || `msg-${t.id}-${idx}`
+            }))
+          }));
+          setThreads(migrated);
+          if (migrated.length > 0) setActiveThreadId(migrated[0].id);
+        } catch (e) {
+          console.error('Failed to load threads', e);
+        }
+      } else {
+        createNewThread();
+      }
+    };
+    init();
   }, []);
 
   useEffect(() => {
@@ -211,7 +287,10 @@ export default function Home() {
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-gemini-key': apiKey
+        },
         body: JSON.stringify({ message: userMessage, model: selectedModel }),
       });
 
@@ -224,7 +303,7 @@ export default function Home() {
           messages: [...t.messages, {
             id: assistantId,
             role: 'system',
-            content: '⚠️ 利用制限に達しました。左下のプルダウンから「別のモデル」に切り替えてもう一度お試しください。'
+            content: '⚠️ 利用制限に達しました。左下のプルダウンから「別のモデル」に切り替えるか、右上の設定（歯車）よりご自身のAPIキーを登録してください。'
           }],
           updatedAt: Date.now()
         } : t));
@@ -433,6 +512,54 @@ export default function Home() {
         </div>
       )}
 
+      {/* --- Settings Modal --- */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-300">
+          <div className="bg-[#fdfaf4] p-8 rounded-2xl border-2 border-[#dcd3b6] shadow-2xl max-w-md w-full relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#a52a2a] to-transparent opacity-30"></div>
+
+            <h3 className="font-japanese font-bold text-[#a52a2a] mb-6 tracking-[0.2em] text-center text-lg">御仕度（設定）</h3>
+
+            <div className="space-y-6">
+              <div>
+                <label className="block text-[10px] font-bold text-[#6b6b6b] mb-2 tracking-widest uppercase">Gemini API Key</label>
+                <input
+                  type="password"
+                  placeholder="AI-..."
+                  value={apiKey}
+                  onChange={async (e) => {
+                    const newVal = e.target.value;
+                    setApiKey(newVal);
+                    const encrypted = await encryptData(newVal);
+                    localStorage.setItem('ndl-gemini-api-key-v2', encrypted);
+                  }}
+                  className="w-full px-4 py-3 rounded-xl border border-[#dcd3b6] bg-white text-sm focus:ring-2 focus:ring-[#a52a2a] focus:border-transparent outline-none transition-all shadow-inner"
+                />
+                <p className="mt-3 text-[10px] text-[#9b9b9b] leading-relaxed">
+                  ※Google AI Studioで取得したキーを入力してください。お使いのブラウザ（localStorage）にのみ暗号化されず保存されます。
+                </p>
+              </div>
+
+              <div className="pt-4 border-t border-[#dcd3b6]/50">
+                <button
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="w-full py-3 bg-[#a52a2a] text-white font-bold rounded-xl shadow-lg hover:bg-[#8b2323] hover:shadow-2xl active:scale-[0.98] transition-all tracking-widest"
+                >
+                  設定を閉じる
+                </button>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setIsSettingsOpen(false)}
+              className="absolute top-4 right-4 text-[#9b9b9b] hover:text-[#a52a2a] transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* --- Main Chat Area --- */}
       <main className="flex-1 flex flex-col relative min-w-0 bg-[#fefdfa]">
         <header className="px-4 py-3 border-b border-[#dcd3b6] bg-white/60 backdrop-blur-md flex items-center justify-between sticky top-0 z-10 shadow-sm">
@@ -449,8 +576,17 @@ export default function Home() {
               {activeThread?.title || '歴史資料横断検索'}
             </h1>
           </div>
-          <div className="text-[8px] sm:text-[9px] text-[#9b9b9b] tracking-wider text-right uppercase flex-shrink-0 ml-2">
-            <span className="hidden xs:inline">NDL Digital Collection </span>Assistant
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-2 hover:bg-[#dcd3b6] rounded-full transition-all text-[#6b6b6b] hover:text-[#a52a2a]"
+              title="設定"
+            >
+              ⚙️
+            </button>
+            <div className="text-[8px] sm:text-[9px] text-[#9b9b9b] tracking-wider text-right uppercase flex-shrink-0">
+              <span className="hidden xs:inline">NDL Digital Collection </span>Assistant
+            </div>
           </div>
         </header>
 

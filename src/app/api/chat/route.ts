@@ -6,16 +6,24 @@ export async function POST(req: NextRequest) {
     try {
         const { message, model: requestedModel } = await req.json();
 
-        // 1. APIキーの確認と初期化
-        const apiKey = process.env.GEMINI_API_KEY;
+        // 1. APIキーの優先順位決定 (Header > .env.local)
+        const clientKey = req.headers.get('x-gemini-key');
+        const envKey = process.env.GEMINI_API_KEY;
+        const apiKey = clientKey || envKey;
+
         if (!apiKey) {
-            throw new Error('GEMINI_API_KEY が設定されていません。.env.local ファイルを確認してください。');
+            throw new Error('APIキーが設定されていません。画面右上の設定（歯車）よりAPIキーを入力してください。');
         }
+
         const genAI = new GoogleGenerativeAI(apiKey);
 
-        // 要求されたモデル、またはデフォルトの 2.0 Flash を使用
+        // --- 抽出ステップ (Quota節約のためLiteモデル固定) ---
+        // ※Liteモデルは制限が極めて緩いため、本命モデルの枠を温存できる
+        const extractionModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
+
+        // --- 回答ステップ (ユーザー指定モデル) ---
         const modelName = requestedModel || 'gemini-2.0-flash';
-        const model = genAI.getGenerativeModel({ model: modelName });
+        const finalModel = genAI.getGenerativeModel({ model: modelName });
 
         // Geminiを使用して、検索クエリと注目キーワード（複数）を抽出
         const extractionPrompt = `
@@ -51,7 +59,7 @@ export async function POST(req: NextRequest) {
             }
         };
 
-        const extractionResult = await generateContentWithRetry(model, extractionPrompt);
+        const extractionResult = await generateContentWithRetry(extractionModel, extractionPrompt);
         const extractionText = extractionResult.response.text().replace(/```json|```/g, '').trim();
         let extractionData;
         try {
@@ -85,7 +93,7 @@ export async function POST(req: NextRequest) {
               歴史案内人に成り代わり、お詫びしつつ、「珍事」「実録」「奇談」「裁判」などのキーワードや、
               特定の地名を加えるなどの探索のアドバイスを趣のある口調で伝えてください。
             `;
-            const failResult = await generateContentWithRetry(model, failPrompt);
+            const failResult = await generateContentWithRetry(finalModel, failPrompt);
             reply = failResult.response.text();
 
             return NextResponse.json({ reply, sources: [] });
@@ -107,7 +115,7 @@ export async function POST(req: NextRequest) {
           ${materialsContext}
         `;
 
-        const finalResult = await generateContentWithRetry(model, completionPrompt);
+        const finalResult = await generateContentWithRetry(finalModel, completionPrompt);
         reply = finalResult.response.text();
 
         return NextResponse.json({
