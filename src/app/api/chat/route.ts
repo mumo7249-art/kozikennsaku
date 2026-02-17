@@ -2,30 +2,33 @@ import { NextRequest, NextResponse } from 'next/server';
 import { searchHistoricalMaterials, searchRandomMaterial } from '@/lib/ndl-api';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-
 export async function POST(req: NextRequest) {
     try {
-        const { message } = await req.json();
+        const { message, model: requestedModel } = await req.json();
 
-        // 1. Geminiを使用して、検索クエリと注目キーワード（複数）を抽出
-        const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
+        // 1. APIキーの確認と初期化
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            throw new Error('GEMINI_API_KEY が設定されていません。.env.local ファイルを確認してください。');
+        }
+        const genAI = new GoogleGenerativeAI(apiKey);
+
+        // 要求されたモデル、またはデフォルトの 2.0 Flash を使用
+        const modelName = requestedModel || 'gemini-2.0-flash';
+        const model = genAI.getGenerativeModel({ model: modelName });
+
+        // Geminiを使用して、検索クエリと注目キーワード（複数）を抽出
         const extractionPrompt = `
-      ユーザーの質問から、国立国会図書館の歴史資料を検索するための情報を抽出してください。
-      あなたは歴史と地域文化に精通した案内人です。質問に含まれる単語を「歴史的な関連語」へ能動的に広げて抽出してください。
+      あなたは専門的な図書館司書です。ユーザーの質問から、国立国会図書館の資料検索に必要な情報をJSON形式で抽出してください。
 
-      【知識拡張の例】
-      - 地名: 「愛知県」→「尾張」「三河」「名古屋」「犬山」「津島」など旧国名や主要都市
-      - 現象: 「体調不良」「病気」→「憑物」「狐憑」「障り」「祟り」「病魔」「邪気」「物の怪」「死霊」
-      - 事件: 「犯罪」「事件」→「裁判」「実録」「奇談」「珍事」「獄」「騒動」
-      - ジャンル: 「怪異」→「怪談」「奇談」「百物語」「怪異」「化物」「幽霊」「不思議」
-
+      【検索のポイント】
+      - 質問に含まれる現代的な言葉を、資料が見つかりやすい歴史的名称や関連語に拡張してください（例：地名→旧国名、犯罪→裁判・実録）。
+      
       【出力形式】
-      以下のJSON形式で出力してください：
       {
-        "query": "書籍検索用のクエリ。地名やジャンルなどを組み合わせた2〜3語（例：'尾張 怪談'）",
-        "focusKeywords": ["資料内検索用の具体的単語（5〜8個）。拡張した関連語を多く含める"],
-        "isRandom": ユーザーが「ランダムに」「何か一つ」などを望んでいる場合は true、それ以外は false
+        "query": "OpenSearch用の2-3語の検索クエリ",
+        "focusKeywords": ["スニペット内を特定するためのキーワード5-8個"],
+        "isRandom": false
       }
       
       ユーザーの質問: ${message}
@@ -93,21 +96,15 @@ export async function POST(req: NextRequest) {
         ).join('\n\n');
 
         const completionPrompt = `
-          あなたは江戸〜明治時代の資料に通じた歴史案内人です。
-          以下の資料断片（スニペット）を読み解き、ユーザーの問い「${message}」に対して、
-          興味深い物語を語るように、趣のある日本語で解説してください。
-          
+          あなたは高度な文献解析アシスタントです。提供された資料断片（スニペット）に基づき、ユーザーの問い「${message}」に回答してください。
+
+          【回答ルール】
+          - 不要な挨拶や演出は省き、事実に基づき簡潔に記述してください。
+          - 根拠となる資料がある語句には、必ず <cite id="資料番号">対象語句</cite> 形式で注釈を付けてください。
+          - OCRの誤字は適宜修正して読みやすくしてください。
+
           【資料内容】
           ${materialsContext}
-          
-          【回答の重要ルール：インライン引用】
-          - 資料の内容に触れる際、その根拠となる資料の番号（1, 2...）を使い、対象の語句を必ず以下の形式で囲ってください。
-          - 形式: <cite id="資料番号">対象語句</cite>
-          
-          【解説の指針】
-          - 珍事、奇談、世相を反映した事件の記録など、歴史の闇や不思議さに焦点を当てて語ってください。
-          - OCRの誤字は文脈から推測して補完し、当時の空気感が伝わるようにしてください。
-          - 歴史の案内人として、少し古風な（しかし分かりやすい）口調を崩さないでください。
         `;
 
         const finalResult = await generateContentWithRetry(model, completionPrompt);
@@ -120,6 +117,15 @@ export async function POST(req: NextRequest) {
 
     } catch (error: any) {
         console.error('API Error:', error);
+
+        // クォータ超過 (429) のハンドリング
+        if (error.status === 429 || error.message?.includes('429') || error.message?.includes('quota')) {
+            return NextResponse.json({
+                error: 'Quota Exceeded',
+                details: '現在のモデルの利用制限（無料枠）に達しました。別のモデルに切り替えてお試しください。'
+            }, { status: 429 });
+        }
+
         return NextResponse.json({
             error: 'Internal Server Error',
             details: error.message || '予期せぬエラーが発生しました。'

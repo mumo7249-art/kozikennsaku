@@ -82,6 +82,7 @@ export default function Home() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState('gemini-2.0-flash');
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
@@ -211,11 +212,24 @@ export default function Home() {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage }),
+        body: JSON.stringify({ message: userMessage, model: selectedModel }),
       });
 
       const data = await response.json();
       const assistantId = `msg-${Date.now() + 1}`;
+
+      if (response.status === 429) {
+        setThreads(prev => prev.map(t => t.id === activeThreadId ? {
+          ...t,
+          messages: [...t.messages, {
+            id: assistantId,
+            role: 'system',
+            content: '⚠️ 利用制限に達しました。左下のプルダウンから「別のモデル」に切り替えてもう一度お試しください。'
+          }],
+          updatedAt: Date.now()
+        } : t));
+        return;
+      }
 
       setThreads(prev => prev.map(t => t.id === activeThreadId ? {
         ...t,
@@ -496,23 +510,47 @@ export default function Home() {
         <div className="p-6 bg-gradient-to-t from-[#f4f1e6] to-[#f4f1e6]/0 pointer-events-none absolute bottom-0 left-0 right-0 h-40"></div>
 
         <footer className="p-4 sm:p-6 md:p-10 relative z-10 bg-[#f4f1e6]/80 backdrop-blur-sm border-t border-[#dcd3b6]">
-          <form onSubmit={handleSubmit} className="max-w-4xl mx-auto flex gap-2 sm:gap-4">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="歴史を問う..."
-              className="flex-1 px-4 sm:px-6 py-3 sm:py-4 rounded-xl sm:rounded-2xl border border-[#dcd3b6] bg-white shadow-inner text-sm focus:outline-none focus:ring-2 focus:ring-[#a52a2a] focus:border-transparent transition-all placeholder:text-[#9b9b9b]"
-              disabled={isLoading}
-            />
-            <button
-              type="submit"
-              disabled={isLoading || !input.trim()}
-              className="px-4 sm:px-8 bg-[#a52a2a] text-white font-bold rounded-xl sm:rounded-2xl shadow-xl hover:bg-[#8b2323] hover:shadow-2xl active:scale-95 transition-all disabled:opacity-50 flex items-center gap-1 sm:gap-2 text-sm sm:text-base"
-            >
-              <span>問う</span>
-              <span className="text-lg opacity-80 hidden sm:inline">≫</span>
-            </button>
+          <form onSubmit={handleSubmit} className="max-w-4xl mx-auto flex flex-col gap-3">
+            <div className="flex gap-2 sm:gap-4">
+              <div className="relative group">
+                <select
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="h-full pl-3 pr-8 py-3 sm:py-4 rounded-xl sm:rounded-2xl border border-[#dcd3b6] bg-white text-xs font-bold text-[#a52a2a] outline-none hover:border-[#a52a2a] transition-all appearance-none cursor-pointer shadow-sm min-w-[120px] sm:min-w-[150px]"
+                  disabled={isLoading}
+                >
+                  <optgroup label="Gemini (Google)">
+                    <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                    <option value="gemini-flash-latest">Gemini 1.5 Flash</option>
+                    <option value="gemini-pro-latest">Gemini 1.5 Pro</option>
+                    <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite</option>
+                  </optgroup>
+                  <optgroup label="Claude (Anthropic) - Coming Soon">
+                    <option value="claude-3-5-sonnet" disabled>Claude 3.5 Sonnet</option>
+                  </optgroup>
+                  <optgroup label="OpenAI - Coming Soon">
+                    <option value="gpt-4o" disabled>GPT-4o</option>
+                  </optgroup>
+                </select>
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-[#a52a2a] opacity-50 text-[10px]">▼</span>
+              </div>
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="歴史を問う..."
+                className="flex-1 px-4 sm:px-6 py-3 sm:py-4 rounded-xl sm:rounded-2xl border border-[#dcd3b6] bg-white shadow-inner text-sm focus:outline-none focus:ring-2 focus:ring-[#a52a2a] focus:border-transparent transition-all placeholder:text-[#9b9b9b]"
+                disabled={isLoading}
+              />
+              <button
+                type="submit"
+                disabled={isLoading || !input.trim()}
+                className="px-4 sm:px-8 bg-[#a52a2a] text-white font-bold rounded-xl sm:rounded-2xl shadow-xl hover:bg-[#8b2323] hover:shadow-2xl active:scale-95 transition-all disabled:opacity-50 flex items-center gap-1 sm:gap-2 text-sm sm:text-base"
+              >
+                <span>問う</span>
+                <span className="text-lg opacity-80 hidden sm:inline">≫</span>
+              </button>
+            </div>
           </form>
           <div className="max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center mt-4 sm:mt-6 gap-2">
             <p className="text-[9px] sm:text-[10px] text-[#9b9b9b] tracking-tight text-center sm:text-left">
